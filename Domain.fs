@@ -16,3 +16,9 @@ type Place =
       owner: string
       lat: float
       lon: float }
+
+[<Struct>]
+type PaginatedResult<'T> = { count: int; items: seq<'T> }
+
+[<Struct>]
+type PaginationParams = { page: int; limit: int }
