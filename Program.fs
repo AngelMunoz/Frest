@@ -18,8 +18,12 @@ open System
 // ------------
 let endpoints =
     [ post Urls.``/auth/login`` Value.Controller.login
-
-      post Urls.``/auth/signup`` Value.Controller.signup ]
+      post Urls.``/auth/signup`` Value.Controller.signup
+      get Urls.``/api/me`` Value.Controller.me
+      get Urls.``/api/places`` Value.Controller.getPlaces
+      post Urls.``/api/places`` Value.Controller.addPlaces
+      put Urls.``/api/places/id`` Value.Controller.updatePlaces
+      delete Urls.``/api/places/id`` Value.Controller.deletePlaces ]
 
 // ------------
 // Register services
@@ -34,7 +38,6 @@ let configureServices (services: IServiceCollection) =
                           let tokenParams = TokenValidationParameters()
                           tokenParams.ValidateIssuer <- false
                           tokenParams.ValidateAudience <- false
-                          tokenParams.ValidateLifetime <- true
                           tokenParams.ValidateIssuerSigningKey <- true
                           tokenParams.IssuerSigningKey <- SymmetricSecurityKey(Encoding.UTF8.GetBytes(Auth.JwtSecret))
                           options.TokenValidationParameters <- tokenParams))
@@ -45,8 +48,8 @@ let configureServices (services: IServiceCollection) =
 // Activate middleware
 // ------------
 let configureApp (app: IApplicationBuilder) =
-    app.UseStaticFiles().UseFalco(endpoints) |> ignore
     app.UseAuthentication() |> ignore
+    app.UseStaticFiles().UseFalco(endpoints) |> ignore
 
 [<EntryPoint>]
 let main args =

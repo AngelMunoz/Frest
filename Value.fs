@@ -6,6 +6,7 @@ open System.Threading.Tasks
 open FSharp.Control.Tasks
 
 open Microsoft.AspNetCore.Http
+open Microsoft.AspNetCore.Authentication
 
 open MongoDB.Bson
 
@@ -15,6 +16,7 @@ open type BCrypt.Net.BCrypt
 
 open Frest.Domain
 open Frest.Provider
+open Microsoft.Extensions.Logging
 
 module Model =
     [<RequireQualifiedAccess>]
@@ -55,6 +57,48 @@ module Model =
 
             }
 
+    [<RequireQualifiedAccess>]
+    module Place =
+        type PlaceError = | DatabaseError
+
+        let getPlaces (owner: string) (pagination: PaginationParams) (logger: ILogger) =
+            task {
+                let! result = Places.FindMyPlaces owner pagination
+
+                return
+                    match result with
+                    | Ok result -> Ok result
+                    | Error ex ->
+                        logger.LogWarning(ex, $"Failed to get places for {owner}")
+                        Error DatabaseError
+            }
+
+
+        let addPlaces (owner: string)
+                      (places: seq<{| name: string
+                                      lat: float
+                                      lon: float |}>)
+                      (logger: ILogger)
+                      =
+            task {
+                let! result =
+                    Places.TryAddPlaces
+                        (places
+                         |> Seq.map (fun place -> {| place with owner = owner |}))
+
+                return
+                    match result with
+                    | Ok result -> Ok result
+                    | Error err ->
+                        logger.LogWarning(err, $"Failed to Save places for {owner}")
+                        Error DatabaseError
+
+            }
+
+        let updatePlace (place: Place) = 0
+
+        let deletePlaces (places: seq<Place>) = 0
+
 
 module Controller =
     open Model
@@ -66,6 +110,10 @@ module Controller =
     let private bindJsonError (error: string) =
         Response.withStatusCode 400
         >> Response.ofPlainText (sprintf "Invalid JSON: %s" error)
+
+    let private failedAuthError (error: string) =
+        Response.withStatusCode 401
+        >> Response.ofJson {| message = $"Request failed to authenticate: [%s{error}]" |}
 
     let private loginHandler (payload: {| email: string; password: string |}) (ctx: HttpContext) =
         task {
@@ -97,7 +145,7 @@ module Controller =
                 let claims = getSignInClaims payload.email
                 let token = Auth.generateJSONWebToken claims
 
-                return! Response.ofJsonOptions Options.jsonOptions {| token = token; user = user |} ctx
+                return! Response.ofJsonOptions Options.JsonOptions {| token = token; user = user |} ctx
             | Error apierror ->
                 return!
                     match apierror with
@@ -115,6 +163,95 @@ module Controller =
                             ctx
         }
 
+    let private getPlacesHandler: HttpHandler =
+        fun (ctx: HttpContext) ->
+            task {
+                let logger = ctx.GetLogger("Places")
+
+                let user =
+                    ctx.GetUser()
+                    |> Option.map
+                        (fun user ->
+                            user.FindFirstValue(ClaimTypes.Name)
+                            |> Option.ofObj)
+                    |> Option.flatten
+
+                let qr = ctx.Request.GetQueryReader()
+
+                let pagination =
+                    { page = defaultArg (qr.TryGetInt "page") 1
+                      limit = defaultArg (qr.TryGetInt "limit") 10 }
+
+                match user with
+                | None ->
+
+                    return!
+                        (Response.withStatusCode 422
+                         >> Response.ofJson {| message = "Unable to complete the request" |})
+                            ctx
+                | Some owner ->
+                    let! places = Places.FindMyPlaces owner pagination
+
+                    match places with
+                    | Error _ ->
+                        return!
+                            (Response.withStatusCode 422
+                             >> Response.ofJson {| message = "Unable to complete the request" |})
+                                ctx
+                    | Ok places -> return! Response.ofJsonOptions Options.JsonOptions places ctx
+            }
+
+    let private addPlacesHandler (places: seq<{| name: string
+                                                 lat: float
+                                                 lon: float |}>)
+                                 (ctx: HttpContext)
+                                 =
+        task {
+            let logger = ctx.GetLogger("Places")
+
+            let user =
+                ctx.GetUser()
+                |> Option.map
+                    (fun user ->
+                        user.FindFirstValue(ClaimTypes.Name)
+                        |> Option.ofObj)
+                |> Option.flatten
+
+            match user with
+            | None ->
+                return!
+                    (Response.withStatusCode 422
+                     >> Response.ofJson {| message = "Unable to complete the request" |})
+                        ctx
+            | Some email ->
+                let! saved = Place.addPlaces email places logger
+
+                match saved with
+                | Ok saved when saved ->
+                    return!
+                        (Response.withStatusCode 201
+                         >> Response.ofJson {| saved = saved |})
+                            ctx
+                | Ok saved when not saved ->
+                    return!
+                        (Response.withStatusCode 400
+                         >> Response.ofJson {| saved = saved |})
+                            ctx
+                | _ ->
+                    return!
+                        (Response.withStatusCode 422
+                         >> Response.ofJson {| message = "Unable to complete the request" |})
+                            ctx
+
+            return! Response.ofJson {| ok = true |} ctx
+        }
+
+    let private updatePlacesHandler (place: Place) (ctx: HttpContext) =
+        task { return! Response.ofJson {| ok = true |} ctx }
+
+    let private deletePlacesHandler (places: seq<Place>) (ctx: HttpContext) =
+        task { return! Response.ofJson {| ok = true |} ctx }
+
     /// HTTP POST /value/create
     let login: HttpHandler =
         Request.bindJson loginHandler bindJsonError
@@ -122,3 +259,30 @@ module Controller =
 
     let signup: HttpHandler =
         Request.bindJson signUpHandler bindJsonError
+
+
+    let me: HttpHandler =
+        Auth.requiresAuthentication
+            (fun (ctx: HttpContext) ->
+                task {
+                    match ctx.GetUser() with
+                    | None -> return! (Response.withStatusCode 404 >> Response.ofEmpty) ctx
+                    | Some user ->
+                        let email = user.FindFirstValue(ClaimTypes.Name)
+
+                        match! Users.TryFindByEmail email with
+                        | None -> return! (Response.withStatusCode 404 >> Response.ofEmpty) ctx
+                        | Some user -> return! Response.ofJsonOptions Options.JsonOptions user ctx
+                })
+            failedAuthError
+
+    let getPlaces: HttpHandler = getPlacesHandler
+
+    let addPlaces: HttpHandler =
+        Request.bindJson addPlacesHandler bindJsonError
+
+    let updatePlaces: HttpHandler =
+        Request.bindJson updatePlacesHandler bindJsonError
+
+    let deletePlaces: HttpHandler =
+        Request.bindJson deletePlacesHandler bindJsonError
