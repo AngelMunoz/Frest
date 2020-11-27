@@ -254,38 +254,46 @@ module Controller =
                         (Response.withStatusCode 422
                          >> Response.ofJson {| message = "Unable to complete the request" |})
                             ctx
-
-            return! Response.ofJson {| ok = true |} ctx
         }
 
-    let private updatePlacesHandler (place: Place) (ctx: HttpContext) =
+    let private updatePlacesHandler (ctx: HttpContext) =
         task {
-            let logger = ctx.GetLogger("Places")
-            let! result = Place.updatePlace [ place ] logger
+            let! place = Request.tryBindJsonOptions<Place> Options.JsonOptions ctx
 
-            match result with
-            | Ok updated -> return! Response.ofJson {| updated = updated |} ctx
-            | Error _ ->
-                return!
-                    (Response.withStatusCode 500
-                     >> Response.ofJson {| updated = false |})
-                        ctx
+            match place with
+            | Error err -> return! bindJsonError err ctx
+            | Ok place ->
+                let logger = ctx.GetLogger("Places")
+                let! result = Place.updatePlace [ place ] logger
+
+                match result with
+                | Ok updated -> return! Response.ofJson {| updated = updated |} ctx
+                | Error _ ->
+                    return!
+                        (Response.withStatusCode 500
+                         >> Response.ofJson {| updated = false |})
+                            ctx
         }
 
-    let private deletePlacesHandler (places: seq<Place>) (ctx: HttpContext) =
+    let private deletePlacesHandler (ctx: HttpContext) =
         task {
-            let logger = ctx.GetLogger("Places")
-            let! result = Place.deletePlaces places logger
+            let! place = Request.tryBindJsonOptions<seq<Place>> Options.JsonOptions ctx
 
-            match result with
-            | Ok deleted -> return! Response.ofJson {| deleted = deleted |} ctx
-            | Error _ ->
-                return!
-                    (Response.withStatusCode 500
-                     >> Response.ofJson {| updated = false |})
-                        ctx
+            match place with
+            | Error err -> return! bindJsonError err ctx
+            | Ok places ->
+                let logger = ctx.GetLogger("Places")
+                let! result = Place.deletePlaces places logger
 
-            return! Response.ofJson {| ok = true |} ctx
+                match result with
+                | Ok deleted -> return! Response.ofJson {| deleted = deleted |} ctx
+                | Error _ ->
+                    return!
+                        (Response.withStatusCode 500
+                         >> Response.ofJson {| updated = false |})
+                            ctx
+
+                return! Response.ofJson {| ok = true |} ctx
         }
 
     /// HTTP POST /value/create
@@ -305,19 +313,21 @@ module Controller =
                     | None -> return! (Response.withStatusCode 404 >> Response.ofEmpty) ctx
                     | Some user ->
                         let email = user.FindFirstValue(ClaimTypes.Name)
+
                         match! Provider.Users.TryFindByEmail email with
                         | None -> return! (Response.withStatusCode 404 >> Response.ofEmpty) ctx
                         | Some user -> return! Response.ofJsonOptions Options.JsonOptions user ctx
                 })
             failedAuthError
 
-    let getPlaces: HttpHandler = getPlacesHandler
+    let getPlaces: HttpHandler =
+        Auth.requiresAuthentication getPlacesHandler failedAuthError
 
     let addPlaces: HttpHandler =
-        Request.bindJson addPlacesHandler bindJsonError
+        Auth.requiresAuthentication (Request.bindJson addPlacesHandler bindJsonError) failedAuthError
 
     let updatePlaces: HttpHandler =
-        Request.bindJson updatePlacesHandler bindJsonError
+        Auth.requiresAuthentication updatePlacesHandler failedAuthError
 
     let deletePlaces: HttpHandler =
-        Request.bindJson deletePlacesHandler bindJsonError
+        Auth.requiresAuthentication deletePlacesHandler failedAuthError
