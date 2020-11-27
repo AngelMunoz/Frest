@@ -42,8 +42,12 @@ module Places =
                 places
                 |> Seq.map
                     (fun place ->
-                        { q = {| _id = place._id |}
-                          u = place
+                        { q =
+                              {| _id = {| ``$oid`` = place._id |}
+                                 owner = place.owner |}
+                          u =
+                              {| place with
+                                     _id = {| ``$oid`` = place._id |} |}
                           upsert = Some false
                           multi = Some false
                           collation = None
@@ -86,7 +90,9 @@ module Places =
                 places
                 |> Seq.map
                     (fun place ->
-                        { q = place
+                        { q =
+                              {| place with
+                                     _id = {| ``$oid`` = place._id |} |}
                           limit = 1
                           collation = None
                           hint = None
@@ -105,7 +111,7 @@ module Places =
 
     let FindMyPlaces (owner: string) (pagination: PaginationParams): Task<Result<PaginatedResult<Place>, exn>> =
         task {
-            let queryFilter = {| email = owner |}
+            let queryFilter = {| owner = owner |}
 
             let findCmd =
                 find PlacesColName {
