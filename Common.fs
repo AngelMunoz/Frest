@@ -8,9 +8,14 @@ open System.Text.Json.Serialization
 open System.Security.Claims
 open System.IdentityModel.Tokens.Jwt
 
+open FSharp.Control.Tasks
+
+open Microsoft.AspNetCore.Http
 open Microsoft.IdentityModel.Tokens
 
 open MongoDB.Bson
+
+open Falco
 
 open Domain
 
@@ -24,6 +29,8 @@ module Urls =
     let ``/auth/login`` = "/auth/login"
     let ``/auth/signup`` = "/auth/signup"
     let ``/api/me`` = "/api/me"
+    let ``/api/places`` = "/api/places"
+    let ``/api/places/id`` = "/api/places/{:id}"
 
 [<RequireQualifiedAccess>]
 module Options =
@@ -38,7 +45,7 @@ module Options =
 
 
 
-    let jsonOptions =
+    let JsonOptions =
         let opts = JsonSerializerOptions()
         opts.Converters.Add(JsonFSharpConverter())
         opts.Converters.Add(ObjectIdConverter())
@@ -48,6 +55,15 @@ module Options =
 
 [<RequireQualifiedAccess>]
 module Auth =
+
+    let requiresAuthentication (successHandler: HttpHandler) (failedAuthHandler: string -> HttpHandler) =
+        fun (ctx: HttpContext) ->
+            task {
+                if Security.Auth.isAuthenticated ctx
+                then return! successHandler ctx
+                else return! failedAuthHandler "Authentication Failed" ctx
+            }
+
 
     let JwtSecret =
         Environment.GetEnvironmentVariable("FREST_JWT_TOKEN")

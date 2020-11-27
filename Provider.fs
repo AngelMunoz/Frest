@@ -25,13 +25,112 @@ module internal Database =
     [<Literal>]
     let UsersColName = "fre_users"
 
-    let mongo () = MongoClient(url)
+    [<Literal>]
+    let PlacesColName = "fre_places"
 
-    let database () = mongo().GetDatabase(DbName)
+    let mongo = lazy (MongoClient(url))
+
+    let database = lazy (mongo.Value.GetDatabase(DbName))
 
 [<RequireQualifiedAccess>]
 module Places =
-    0
+    open Database
+
+    let TryUpdatePlaces (places: seq<Place>): Task<Result<bool, exn>> =
+        task {
+            let records =
+                places
+                |> Seq.map
+                    (fun place ->
+                        { q = {| _id = place._id |}
+                          u = place
+                          upsert = Some false
+                          multi = Some false
+                          collation = None
+                          arrayFilters = None
+                          hint = None })
+
+            try
+                let! result =
+                    database.Value.RunCommandAsync<UpdateResult>(JsonCommand(update PlacesColName { updates records }))
+
+                return
+                    Ok
+                        (result.nModified >= 0
+                         && result.n >= 0
+                         && result.ok = 1.0)
+            with ex ->
+                eprintfn $"TryUpdatePlaces: [{ex.Message}]"
+                return Error ex
+        }
+
+    let TryAddPlaces (places: seq<{| name: string
+                                     owner: string
+                                     lat: float
+                                     lon: float |}>)
+                     : Task<Result<bool, exn>> =
+        task {
+            try
+                let! result =
+                    database.Value.RunCommandAsync<InsertResult>(JsonCommand(insert PlacesColName { documents places }))
+
+                return Ok(result.n > 0 && result.ok = 1.0)
+            with ex ->
+                eprintfn $"TryAddPlaces: [{ex.Message}]"
+                return Error ex
+        }
+
+    let TryDeletePlaces (places: seq<Place>) =
+        task {
+            let records =
+                places
+                |> Seq.map
+                    (fun place ->
+                        { q = place
+                          limit = 1
+                          collation = None
+                          hint = None
+                          comment = None })
+
+            try
+                let! result =
+                    database.Value.RunCommandAsync<DeleteResult>(JsonCommand(delete PlacesColName { deletes records }))
+
+                return Ok(result.n > 0 && result.ok = 1.0)
+            with ex ->
+                eprintfn $"TryDeletePlaces: [{ex.Message}]"
+                return Error ex
+
+        }
+
+    let FindMyPlaces (owner: string) (pagination: PaginationParams): Task<Result<PaginatedResult<Place>, exn>> =
+        task {
+            let queryFilter = {| email = owner |}
+
+            let findCmd =
+                find PlacesColName {
+                    filter queryFilter
+                    limit pagination.limit
+                    skip ((pagination.page - 1) * pagination.limit)
+                }
+
+            let countCmd =
+                count {
+                    collection PlacesColName
+                    query queryFilter
+                }
+
+            try
+                let! result = database.Value.RunCommandAsync<FindResult<Place>>(JsonCommand findCmd)
+
+                let! count = database.Value.RunCommandAsync<CountResult>(JsonCommand countCmd)
+
+                return
+                    Ok
+                        { count = count.n
+                          items = result.cursor.firstBatch }
+            with ex -> return Error ex
+        }
 
 [<RequireQualifiedAccess>]
 module Users =
@@ -46,9 +145,7 @@ module Users =
                 }
 
             try
-                let! result =
-                    database()
-                        .RunCommandAsync<FindResult<User>>(JsonCommand findOne)
+                let! result = database.Value.RunCommandAsync<FindResult<User>>(JsonCommand findOne)
 
                 return result.cursor.firstBatch |> Seq.tryHead
             with ex ->
@@ -70,14 +167,14 @@ module Users =
 
             try
                 let! result =
-                    database()
-                        .RunCommandAsync<FindResult<{| _id: ObjectId
-                                                       email: string
-                                                       password: string |}>>(JsonCommand findOne)
+                    database.Value.RunCommandAsync<FindResult<{| _id: ObjectId
+                                                                 email: string
+                                                                 password: string |}>>
+                        (JsonCommand findOne)
 
                 return result.cursor.firstBatch |> Seq.tryHead
             with ex ->
-                eprintfn $"TryFindByEmail: [{ex.Message}]"
+                eprintfn $"TryFindByEmailWithPassword: [{ex.Message}]"
                 return None
         }
 
@@ -89,9 +186,7 @@ module Users =
                     query {| email = email |}
                 }
 
-            let! result =
-                database()
-                    .RunCommandAsync<CountResult>(JsonCommand existsCmd)
+            let! result = database.Value.RunCommandAsync<CountResult>(JsonCommand existsCmd)
 
             return result.n > 0
         }
@@ -102,12 +197,8 @@ module Users =
                             password: string |})
                   : Task<Option<User>> =
         task {
-            let insertCmd =
-                insert UsersColName { documents [ user ] }
-
             let! result =
-                database()
-                    .RunCommandAsync<InsertResult>(JsonCommand insertCmd)
+                database.Value.RunCommandAsync<InsertResult>(JsonCommand(insert UsersColName { documents [ user ] }))
 
             if result.n > 0 && result.ok = 1.0 then return! TryFindByEmail user.email else return None
         }
