@@ -6,26 +6,25 @@ open System.Threading.Tasks
 open FSharp.Control.Tasks
 
 open Microsoft.AspNetCore.Http
-open Microsoft.AspNetCore.Authentication
-
-open MongoDB.Bson
+open Microsoft.Extensions.Logging
 
 open Falco
 
-open type BCrypt.Net.BCrypt
 
 open Frest.Domain
-open Frest.Provider
-open Microsoft.Extensions.Logging
 
 module Model =
+    open Frest.Provider
+
+    type ManagedError =
+        | AlreadyExists
+        | EmptyValues
+        | FailedToCreate
+        | DatabaseError
+
     [<RequireQualifiedAccess>]
     module User =
-        // Errors
-        type ManagedError =
-            | AlreadyExists
-            | EmptyValues
-            | FailedToCreate
+        open type BCrypt.Net.BCrypt
 
         let login (user: {| email: string; password: string |}) =
             task {
@@ -59,7 +58,6 @@ module Model =
 
     [<RequireQualifiedAccess>]
     module Place =
-        type PlaceError = | DatabaseError
 
         let getPlaces (owner: string) (pagination: PaginationParams) (logger: ILogger) =
             task {
@@ -95,9 +93,23 @@ module Model =
 
             }
 
-        let updatePlace (place: Place) = 0
+        let updatePlace (places: seq<Place>) (logger: ILogger) =
+            task {
+                match! Places.TryUpdatePlaces places with
+                | Ok bool -> return Ok bool
+                | Error ex ->
+                    logger.LogWarning(ex, $"Failed to update Place %A{places |> Seq.map (fun p -> p._id.ToString())}")
+                    return Error DatabaseError
+            }
 
-        let deletePlaces (places: seq<Place>) = 0
+        let deletePlaces (places: seq<Place>) (logger: ILogger) =
+            task {
+                match! Places.TryDeletePlaces places with
+                | Ok deleted -> return Ok deleted
+                | Error ex ->
+                    logger.LogWarning(ex, $"Failed to delete places %A{places |> Seq.map (fun p -> p._id.ToString())}")
+                    return Error DatabaseError
+            }
 
 
 module Controller =
@@ -149,11 +161,11 @@ module Controller =
             | Error apierror ->
                 return!
                     match apierror with
-                    | User.ManagedError.AlreadyExists ->
+                    | AlreadyExists ->
                         (Response.withStatusCode 400
                          >> Response.ofJson {| message = "Email is in use." |})
                             ctx
-                    | User.ManagedError.FailedToCreate ->
+                    | FailedToCreate ->
                         (Response.withStatusCode 500
                          >> Response.ofJson {| message = "Failed to create user." |})
                             ctx
@@ -190,7 +202,7 @@ module Controller =
                          >> Response.ofJson {| message = "Unable to complete the request" |})
                             ctx
                 | Some owner ->
-                    let! places = Places.FindMyPlaces owner pagination
+                    let! places = Provider.Places.FindMyPlaces owner pagination
 
                     match places with
                     | Error _ ->
@@ -247,10 +259,34 @@ module Controller =
         }
 
     let private updatePlacesHandler (place: Place) (ctx: HttpContext) =
-        task { return! Response.ofJson {| ok = true |} ctx }
+        task {
+            let logger = ctx.GetLogger("Places")
+            let! result = Place.updatePlace [ place ] logger
+
+            match result with
+            | Ok updated -> return! Response.ofJson {| updated = updated |} ctx
+            | Error _ ->
+                return!
+                    (Response.withStatusCode 500
+                     >> Response.ofJson {| updated = false |})
+                        ctx
+        }
 
     let private deletePlacesHandler (places: seq<Place>) (ctx: HttpContext) =
-        task { return! Response.ofJson {| ok = true |} ctx }
+        task {
+            let logger = ctx.GetLogger("Places")
+            let! result = Place.deletePlaces places logger
+
+            match result with
+            | Ok deleted -> return! Response.ofJson {| deleted = deleted |} ctx
+            | Error _ ->
+                return!
+                    (Response.withStatusCode 500
+                     >> Response.ofJson {| updated = false |})
+                        ctx
+
+            return! Response.ofJson {| ok = true |} ctx
+        }
 
     /// HTTP POST /value/create
     let login: HttpHandler =
@@ -269,8 +305,7 @@ module Controller =
                     | None -> return! (Response.withStatusCode 404 >> Response.ofEmpty) ctx
                     | Some user ->
                         let email = user.FindFirstValue(ClaimTypes.Name)
-
-                        match! Users.TryFindByEmail email with
+                        match! Provider.Users.TryFindByEmail email with
                         | None -> return! (Response.withStatusCode 404 >> Response.ofEmpty) ctx
                         | Some user -> return! Response.ofJsonOptions Options.JsonOptions user ctx
                 })
