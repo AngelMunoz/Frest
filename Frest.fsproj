@@ -16,7 +16,7 @@
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.2" />
     <PackageReference Include="Falco" Version="3.0.0-alpha6" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="5.0.0" />
-    <PackageReference Include="Mondocks" Version="0.1.0-beta3" />
+    <PackageReference Include="Mondocks" Version="0.1.0" />
     <PackageReference Include="MongoDB.Driver" Version="2.11.4" />
     <PackageReference Include="FSharp.SystemTextJson" Version="0.15.*" />
     <PackageReference Include="ply" Version="0.3.1" />
