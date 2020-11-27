@@ -55,14 +55,14 @@ module Options =
 
 [<RequireQualifiedAccess>]
 module Auth =
+    open Falco.Security
 
     let requiresAuthentication (successHandler: HttpHandler) (failedAuthHandler: string -> HttpHandler) =
         fun (ctx: HttpContext) ->
-            task {
-                if Security.Auth.isAuthenticated ctx
-                then return! successHandler ctx
-                else return! failedAuthHandler "Authentication Failed" ctx
-            }
+            if Auth.isAuthenticated ctx
+            then successHandler ctx
+            else failedAuthHandler "Authentication Failed" ctx
+
 
 
     let JwtSecret =
