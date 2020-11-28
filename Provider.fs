@@ -14,6 +14,8 @@ open Mondocks.Types
 open Frest.Domain
 
 module internal Database =
+
+
     let private url =
         Environment.GetEnvironmentVariable("FREST_DB_URL")
         |> Option.ofObj
@@ -43,11 +45,9 @@ module Places =
                 |> Seq.map
                     (fun place ->
                         { q =
-                              {| _id = {| ``$oid`` = place._id |}
-                                 owner = place.owner |}
-                          u =
-                              {| place with
-                                     _id = {| ``$oid`` = place._id |} |}
+                              { _id = { ``$oid`` = place._id }
+                                owner = place.owner }
+                          u = PlaceUpdateDefinition.FromPlace place
                           upsert = Some false
                           multi = Some false
                           collation = None
@@ -68,11 +68,7 @@ module Places =
                 return Error ex
         }
 
-    let TryAddPlaces (places: seq<{| name: string
-                                     owner: string
-                                     lat: float
-                                     lon: float |}>)
-                     : Task<Result<bool, exn>> =
+    let TryAddPlaces (places: seq<SavePlaceDefinition>): Task<Result<bool, exn>> =
         task {
             try
                 let! result =
@@ -91,8 +87,8 @@ module Places =
                 |> Seq.map
                     (fun place ->
                         { q =
-                              {| place with
-                                     _id = {| ``$oid`` = place._id |} |}
+                              { _id = { ``$oid`` = place._id }
+                                owner = place.owner }
                           limit = 1
                           collation = None
                           hint = None
@@ -197,11 +193,7 @@ module Users =
             return result.n > 0
         }
 
-    let TryCreate (user: {| name: string
-                            lastName: string
-                            email: string
-                            password: string |})
-                  : Task<Option<User>> =
+    let TryCreate (user: SignupPayload): Task<Option<User>> =
         task {
             let! result =
                 database.Value.RunCommandAsync<InsertResult>(JsonCommand(insert UsersColName { documents [ user ] }))

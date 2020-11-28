@@ -26,18 +26,14 @@ module Model =
     module User =
         open type BCrypt.Net.BCrypt
 
-        let login (user: {| email: string; password: string |}) =
+        let login (user: LoginPayload) =
             task {
                 match! Users.TryFindByEmailWithPassword user.email with
                 | Some found -> return EnhancedVerify(user.password, found.password)
                 | None -> return false
             }
 
-        let signup (user: {| name: string
-                             lastName: string
-                             email: string
-                             password: string |})
-                   : Task<Result<User, ManagedError>> =
+        let signup (user: SignupPayload): Task<Result<User, ManagedError>> =
             task {
                 let! exists = Users.Exists user.email
 
@@ -47,8 +43,8 @@ module Model =
 
                     let! user =
                         Users.TryCreate
-                            {| user with
-                                   password = EnhancedHashPassword user.password |}
+                            { user with
+                                  password = EnhancedHashPassword user.password }
 
                     match user with
                     | None -> return Error FailedToCreate
@@ -82,7 +78,12 @@ module Model =
                 let! result =
                     Places.TryAddPlaces
                         (places
-                         |> Seq.map (fun place -> {| place with owner = owner |}))
+                         |> Seq.map
+                             (fun place ->
+                                 { name = place.name
+                                   lat = place.lat
+                                   lon = place.lon
+                                   owner = owner }))
 
                 return
                     match result with
@@ -127,7 +128,7 @@ module Controller =
         Response.withStatusCode 401
         >> Response.ofJson {| message = $"Request failed to authenticate: [%s{error}]" |}
 
-    let private loginHandler (payload: {| email: string; password: string |}) (ctx: HttpContext) =
+    let private loginHandler (payload: LoginPayload) (ctx: HttpContext) =
         task {
             let! loggedIn = User.login payload
 
@@ -143,12 +144,7 @@ module Controller =
             return! Response.ofJson {| token = token |} ctx
         }
 
-    let signUpHandler (payload: {| name: string
-                                   lastName: string
-                                   email: string
-                                   password: string |})
-                      (ctx: HttpContext)
-                      =
+    let signUpHandler (payload: SignupPayload) (ctx: HttpContext) =
         task {
             let! signedUp = User.signup payload
 
