@@ -1,5 +1,6 @@
 {
-    "files.exclude": {
-        "**/Frest.Web": true
-    }
+  "files.exclude": {
+    "**/Frest.Web": true,
+    "Frest.code-workspace": true
+  }
 }

@@ -1,11 +1,13 @@
 {
   "folders": [
-	{
-		"path": "."
-	},
-	{
-		"path": "Frest.Web"
-	}
-],
+    {
+      "path": ".",
+      "name": "Server"
+    },
+    {
+      "path": "Frest.Web",
+      "name": "Web"
+    }
+  ],
   "settings": {}
 }
