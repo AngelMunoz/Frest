@@ -32,3 +32,7 @@ router.setRoutes([
     name: 'places',
   },
 ]);
+
+if (import.meta.hot) {
+  import.meta.hot.accept();
+}

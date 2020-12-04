@@ -1,0 +1,5 @@
+{
+    "files.exclude": {
+        "**/Frest.Web": true
+    }
+}

@@ -59,5 +59,13 @@ declare module '*.png' {
 /* CUSTOM: ADD YOUR OWN HERE */
 
 type LoginPayload = { email: string; password: string };
+type SignupPayload = {
+  name: string;
+  lastName: string;
+  email: string;
+  password: string;
+};
 type AuthState = { isAuthenticated: boolean; user?: string };
 type AppContext = { authentication: AuthState };
+
+type AuthResponse = { token: string } | { message: string };
